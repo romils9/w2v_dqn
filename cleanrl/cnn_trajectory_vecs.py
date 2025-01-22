@@ -143,21 +143,6 @@ class QNetwork(nn.Module):
             nn.Linear(512, env.single_action_space.n),
         )
 
-        # self.network = nn.Sequential(
-        #     nn.Conv2d(4, 32, 8, stride=4),
-        #     nn.ReLU(),
-        #     nn.Conv2d(32, 64, 4, stride=2),
-        #     nn.ReLU(),
-        #     nn.Conv2d(64, 64, 3, stride=1),
-        #     nn.ReLU(),
-        #     nn.Flatten()
-        # )
-        # self.fc_layers = nn.Sequential(
-        #     nn.Linear(3136, 512),
-        #     nn.ReLU(),
-        #     nn.Linear(512, env.single_action_space.n),
-        # )
-
     def forward(self, x):
         x = self.network(x / 255.0)
         x = self.fc_layers(x / 255.0)
