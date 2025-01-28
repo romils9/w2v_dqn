@@ -193,13 +193,8 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
     )
-
-    # Function to Load model weights
-    def load_model_weights(model, weight_path):
-        model.load_state_dict(torch.load(weight_path))
-        return model
     
-
+    
     # Load weights
     run_name = f"BreakoutNoFrameskip-v4__dqn_atari__1__1736379420"
     model_path = f"runs/{run_name}/dqn_atari.cleanrl_model"
@@ -290,3 +285,17 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     print("test_model output:", test_op)
     print("cust_model op: ", cust_op)
 
+    # Saving the model with the new structure
+    run_name = f"BreakoutNoFrameskip-v4__dqn_atari__10M_cnn_fcc_split"
+    log_dir = f"runs/{run_name}"
+
+    # Create the directory
+    os.makedirs(log_dir, exist_ok=True)
+    if os.path.exists(log_dir):
+        print(f"The directory {log_dir} exists.")
+    else:
+        print(f"Failed to create the directory {log_dir}.")
+
+    model_path = f"runs/{run_name}/dqn_atari.cleanrl_model"
+    torch.save(q_network.state_dict(), model_path)
+    print(f"model saved to {model_path}")
