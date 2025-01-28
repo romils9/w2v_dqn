@@ -169,6 +169,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     print("experiment name: ", args.exp_name)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
     )
@@ -276,9 +277,41 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     torch.save(test_model.state_dict(), model_path)
     print(f"model saved to {model_path}")
 
-    #### Testing the saved model is correct
+    ### Testing the saved model is correct
     cust_model.load_state_dict(torch.load(model_path, map_location=device))
     cust_op = cust_model(dummy_input)
     print("q_network output:", q_op)
     print("test_model output:", test_op)
     print("cust_model op: ", cust_op)
+
+    # Just loading the CNN part of the model
+    temp_model = cust_CNN_Model(envs).to(device)
+    cnn_state_dict = {k: v for k, v in test_model.state_dict().items() if "cnn" in k}
+    fcc_state_dict = {k: v for k, v in temp_model.state_dict().items() if "fcc_layers" in k}
+    print("cnn_state_dict.keys(): ", cnn_state_dict.keys())
+    keys_temp = list(temp_model.state_dict().keys())
+    print("temp_model keys: ", keys_temp)
+    # Merge cnn_state_dict and fcl_state_dict
+    merged_state_dict = {**cnn_state_dict, **fcc_state_dict}
+
+    # Load into the target model
+    temp_model.load_state_dict(merged_state_dict, strict=True)
+    keys_cnn = list(cnn_state_dict.keys())
+
+    all_equal = True
+    if len(keys_test)==len(keys_q):
+        for idx in range(len(keys_temp)):
+            equal = torch.equal(temp_model.state_dict()[keys_temp[idx]], test_model.state_dict()[keys_test[idx]])
+            print(f"Layer {idx+1}: {'Equal' if equal else 'Not Equal'}")
+
+            if not equal:
+                all_equal = False
+            # end equal if
+        # end for
+
+        if all_equal:
+            print("All layers in both models have equal weights!")
+        else:
+            print("Some layers have different weights.")
+    else:
+        print("Architecture mismatch!")
