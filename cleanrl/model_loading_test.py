@@ -105,25 +105,6 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
 ###########################################################################
 # # Define the QNetwork class (already defined in your code)
-# class cust_QNetwork(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.network = nn.Sequential(
-#             nn.Conv2d(4, 32, 8, stride=4),
-#             nn.ReLU(),
-#             nn.Conv2d(32, 64, 4, stride=2),
-#             nn.ReLU(),
-#             nn.Conv2d(64, 64, 3, stride=1),
-#             nn.ReLU(),
-#             nn.Flatten(),
-#             nn.Linear(3136, 512),
-#             nn.ReLU(),
-#             nn.Linear(512, 4),  # Adjust to match the number of actions
-#         )
-
-#     def forward(self, x):
-#         return self.network(x / 255.0)
-
 class QNetwork(nn.Module):
     def __init__(self, env):
         super().__init__()
@@ -186,14 +167,11 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
         )
     args = tyro.cli(Args)
     print("experiment name: ", args.exp_name)
-    assert args.num_envs == 1, "vectorized envs are not supported at the moment"
-    run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     envs = gym.vector.SyncVectorEnv(
         [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
     )
-    
     
     # Load weights
     run_name = f"BreakoutNoFrameskip-v4__dqn_atari__1__1736379420"
@@ -205,8 +183,6 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     cust_model.load_state_dict(test_model.state_dict()) # this ensures same initialization as test_model
 
     q_network = QNetwork(envs).to(device) # model based on the OG QNetwork
-    # epsilon=0.05
-    # eval_episodes=3
     q_network.load_state_dict(torch.load(model_path, map_location=device))
     q_network.eval()
 
@@ -297,5 +273,12 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
         print(f"Failed to create the directory {log_dir}.")
 
     model_path = f"runs/{run_name}/dqn_atari.cleanrl_model"
-    torch.save(q_network.state_dict(), model_path)
+    torch.save(test_model.state_dict(), model_path)
     print(f"model saved to {model_path}")
+
+    #### Testing the saved model is correct
+    cust_model.load_state_dict(torch.load(model_path, map_location=device))
+    cust_op = cust_model(dummy_input)
+    print("q_network output:", q_op)
+    print("test_model output:", test_op)
+    print("cust_model op: ", cust_op)
