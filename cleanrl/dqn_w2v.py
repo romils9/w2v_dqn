@@ -59,13 +59,13 @@ class Args:
     # env_id: str = "BreakoutNoFrameskip-v4"
     env_id: str = "PongNoFrameskip-v4"
     """the id of the environment"""
-    total_timesteps: int = 1_000
+    total_timesteps: int = 1_000_000
     """total timesteps of the experiments"""
     learning_rate: float = 1e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    buffer_size: int = 1_000
+    buffer_size: int = 100_000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -111,14 +111,12 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
     return thunk
 
-###########################################################################
-# Define the QNetwork class (already defined in your code)
-device = "cuda"
-
-class cust_QNetwork(nn.Module):
-    def __init__(self):
+########################################################################### Q Network
+class cust_CNN_Model(nn.Module):
+    def __init__(self, env):
         super().__init__()
-        self.network = nn.Sequential(
+        # Define only the CNN layer
+        self.cnn = nn.Sequential(
             nn.Conv2d(4, 32, 8, stride=4),
             nn.ReLU(),
             nn.Conv2d(32, 64, 4, stride=2),
@@ -126,143 +124,66 @@ class cust_QNetwork(nn.Module):
             nn.Conv2d(64, 64, 3, stride=1),
             nn.ReLU(),
             nn.Flatten(),
+        )
+        # Freeze the CNN backbone
+        for param in self.cnn.parameters():
+            param.requires_grad = False
+
+        # Define the Fully Connected Layers
+        self.fcc_layers = nn.Sequential(
             nn.Linear(3136, 512),
             nn.ReLU(),
-            nn.Linear(512, 4),  # Adjust to match the number of actions
+            nn.Linear(512, env.single_action_space.n)
         )
 
     def forward(self, x):
-        return self.network(x / 255.0)
+        x = self.cnn(x / 255.0)
+        x *= 255.0
+        x = self.fcc_layers(x / 255.0)
+        return x
 
-# Define the ReducedCNN class
-class cust_ReducedCNN(nn.Module):
-    def __init__(self):
+
+###########################################################################
+# Define the modified QNetwork to include w2v layers
+class cust_w2v_model(nn.Module):
+    def __init__(self, env):
         super().__init__()
-        self.network = nn.Sequential()  # Initialize an empty Sequential model
-
-    def forward(self, x):
-        return self.network(x / 255.0)
-
-# Initialize reduced_model
-cust_reduced_model = cust_ReducedCNN()
-cust_larger_model = cust_QNetwork()
-# Ensure models are on the same device
-cust_larger_model.to(device)
-cust_reduced_model.to(device)
-
-# Copy the first 7 layers from larger_model into reduced_model
-cust_reduced_model.network = nn.Sequential(*list(cust_larger_model.network.children())[:7])
-
-# Define the extended model
-class cust_ExtendedModel(nn.Module):
-    def __init__(self, reduced_cnn):
-        super().__init__()
-        # Use the ReducedCNN backbone
-        self.cnn_backbone = reduced_cnn
+        # Define only the CNN layer
+        self.cnn = nn.Sequential(
+            nn.Conv2d(4, 32, 8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, 3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
         # Freeze the CNN backbone
-        for param in self.cnn_backbone.parameters():
+        for param in self.cnn.parameters():
             param.requires_grad = False
 
         # Add a new trainable linear layer
-        self.fc = nn.Sequential(
+        self.w2v = nn.Sequential(
             nn.Linear(3136, 128),  # Input size matches the Flatten output of the CNN
             nn.ReLU()
         )
-        for param in self.fc.parameters():
+        for param in self.w2v.parameters():
             param.requires_grad = False
 
-    def forward(self, x):
-        x = self.cnn_backbone(x / 255.0)
-        x = self.fc(x / 255.0)
-        return x
-
-test_model = cust_ExtendedModel(cust_reduced_model).to(device)
-
-# Load model weights
-def load_model_weights(model, weight_path):
-    model.load_state_dict(torch.load(weight_path))
-    return model
-
-# Load weights
-test_model = load_model_weights(test_model, 'extended_model.pth')
-print(test_model)
-
-################################################################################################################################################
-
-class fcc(nn.Module):
-    def __init__(self, env):
-        super().__init__()
+        # Define the Fully Connected Layers
         self.fcc_layers = nn.Sequential(
             nn.Linear(128, 512),
             nn.ReLU(),
             nn.Linear(512, env.single_action_space.n)
         )
-    
+
     def forward(self, x):
+        x = self.cnn(x / 255.0)
+        x *= 255.0
+        x = self.w2v(x / 255.0)
+        x *= 255.0
         x = self.fcc_layers(x / 255.0)
         return x
-
-print("Now the FCL part of the model has been defined! ")
-
-# ALGO LOGIC: initialize agent here:
-class CombinedModel(nn.Module):
-    def __init__(self, reduced_cnn, env):
-        super().__init__()
-        # Instantiate cust_ExtendedModel and fcc
-        self.cust_model = cust_ExtendedModel(reduced_cnn)
-        self.fcc_model = fcc(env)
-
-    def forward(self, x):
-        # Pass input through cust_ExtendedModel
-        x = self.cust_model(x / 255.0)
-        
-        # Pass the output of cust_ExtendedModel through fcc
-        x = self.fcc_model(x / 255.0)
-        return x
-    
-print("Now the networks have been combined in the <CombinedModel> class")
-# class QNetwork(nn.Module):
-#     def __init__(self, env):
-#         super().__init__()
-#         self.network = nn.Sequential(
-#             nn.Conv2d(4, 32, 8, stride=4),
-#             nn.ReLU(),
-#             nn.Conv2d(32, 64, 4, stride=2),
-#             nn.ReLU(),
-#             nn.Conv2d(64, 64, 3, stride=1),
-#             nn.ReLU(),
-#             nn.Flatten(),
-#         )
-
-#     def forward(self, x):
-#         return self.network(x / 255.0)
-    
-# class fcc(nn.Module):
-#     def __init__(self, env):
-#         super().__init__()
-#         self.fcc_layers = nn.Sequential(
-#             nn.Linear(3136, 512),
-#             nn.ReLU(),
-#             nn.Linear(512, env.single_action_space.n)
-#         )
-    
-#     def forward(self, x):
-#         x = self.fcc_layers(x / 255.0)
-#         return x
-    
-# class w2v(nn.Module):
-#     def __init__(self, env):
-#         super().__init__()
-#         self.w2v_layers = nn.Sequential(
-#             # nn.Linear(3136, 512),
-#             # nn.ReLU(),
-#             # nn.Linear(512, env.single_action_space.n),
-#         )
-    
-    # def forward(self, x):
-    #     x = self.w2v_layers(x / 255.0)
-    #     return x
-
 
 
 def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
@@ -284,18 +205,18 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     print("experiment name: ", args.exp_name)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        import wandb
+    # if args.track:
+    #     import wandb
 
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
+    #     wandb.init(
+    #         project=args.wandb_project_name,
+    #         entity=args.wandb_entity,
+    #         sync_tensorboard=True,
+    #         config=vars(args),
+    #         name=run_name,
+    #         monitor_gym=True,
+    #         save_code=True,
+    #     )
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
@@ -315,16 +236,49 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
         [make_env(args.env_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-    # print("Aamir check: envs.action_space.n = ", envs.action_space.nvec)
-    # print("All combinations of the action space: ", envs.action_space.nvec.prod())
-    # assert False, "check done"
 
-    # q_network = QNetwork(envs).to(device)
-    q_network = CombinedModel(cust_reduced_model, envs).to(device)
-    optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
-    # target_network = QNetwork(envs).to(device)
-    target_network = CombinedModel(cust_reduced_model, envs).to(device)
-    target_network.load_state_dict(q_network.state_dict())
+    # Create an instance of the Agent class and loading it with the appropriate weights
+    temp_model = cust_w2v_model(envs).to(device)
+    run_name_w2v = f"BreakoutNoFrameskip-v4__dqn_w2v__10M_cnn_128_w2v_split"
+    saved_model_path = f"runs/{run_name_w2v}/dqn_w2v.cleanrl_model"
+    temp_model.load_state_dict(torch.load(saved_model_path, map_location=device))
+
+    # q_network = cust_w2v_model(envs).to(device)
+
+    # # Loading the CNN+w2v part of the model
+    # cnn_state_dict = {k: v for k, v in temp_model.state_dict().items() if "cnn" in k}
+    # w2v_state_dict_2 = {k: v for k, v in temp_model.state_dict().items() if "w2v" in k}
+    # fcc_state_dict = {k: v for k, v in q_network.state_dict().items() if "fcc_layers" in k}
+    # merged_state_dict = {**cnn_state_dict, **w2v_state_dict_2, **fcc_state_dict}
+    # q_network.load_state_dict(merged_state_dict, strict=True) # Loads the CNN weights but not the FCL
+    
+    # optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
+    # # target_network = QNetwork(envs).to(device)
+    # target_network = cust_w2v_model(envs).to(device)
+    # target_network.load_state_dict(q_network.state_dict())
+
+    # print("Q network model: ", q_network)
+
+    ####################################
+    cnn_og_model = cust_CNN_Model(envs).to(device)
+    run_name_2 = f"BreakoutNoFrameskip-v4__dqn_atari__10M_cnn_fcc_split"
+    saved_model_path = f"runs/{run_name_2}/dqn_atari.cleanrl_model"
+    cnn_og_model.load_state_dict(torch.load(saved_model_path, map_location=device))
+
+    keys_og = list(cnn_og_model.state_dict().keys())
+    keys_q = list(temp_model.state_dict().keys())
+
+    print("The keys of both networks are: ")
+    print("QNetwork: ", keys_og)
+    print("w2v induced: ", keys_q)
+
+    print("Checking the weights matching between OG and new model")
+    for idx in range(len(keys_og)):
+        equal = torch.equal(temp_model.state_dict()[keys_q[idx]], cnn_og_model.state_dict()[keys_og[idx]])
+        print(f"Layer {idx+1} i.e. {keys_q[idx]} and {keys_og[idx]}: {'Equal' if equal else 'Not Equal'}")
+
+
+    assert False, "Weight check"
 
     rb = ReplayBuffer(
         args.buffer_size,
@@ -400,8 +354,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(q_network.state_dict(), model_path)
         print(f"model saved to {model_path}")
-        new_model_path = f"runs/BreakoutNoFrameskip-v4__dqn_w2v__1__1737535394/dqn_w2v.cleanrl_model"
-        from cleanrl_utils.evals.dqn_eval_updated import evaluate
+        from cleanrl_utils.evals.dqn_eval import evaluate
 
         # episodic_returns = evaluate(
         #     model_path,
@@ -414,13 +367,12 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
         #     epsilon=0.05,
         # )
         episodic_returns = evaluate(
-            new_model_path,
+            model_path,
             make_env,
             args.env_id,
             eval_episodes=10,
             run_name=f"{run_name}-eval",
-            Model=CombinedModel,
-            reduced_cnn = cust_reduced_model,
+            Model=cust_w2v_model,
             device=device,
             epsilon=0.05,
         )
