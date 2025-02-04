@@ -124,7 +124,7 @@ class QNetwork(nn.Module):
     def forward(self, x):
         return self.network(x / 255.0)
 
-
+# # Defining the customized Q-Network combined with w2v
 class cust_CNN_Model(nn.Module):
     def __init__(self, env):
         super().__init__()
@@ -155,7 +155,8 @@ class cust_CNN_Model(nn.Module):
         x = self.fcc_layers(x / 255.0)
         return x
 
-
+#####################################################################################33
+# Start of the main function:
 if __name__ == "__main__":
     import stable_baselines3 as sb3
 

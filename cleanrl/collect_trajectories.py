@@ -116,10 +116,30 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
 
 # ALGO LOGIC: initialize agent here:
-class QNetwork(nn.Module):
+# class QNetwork(nn.Module):
+#     def __init__(self, env):
+#         super().__init__()
+#         self.network = nn.Sequential(
+#             nn.Conv2d(4, 32, 8, stride=4),
+#             nn.ReLU(),
+#             nn.Conv2d(32, 64, 4, stride=2),
+#             nn.ReLU(),
+#             nn.Conv2d(64, 64, 3, stride=1),
+#             nn.ReLU(),
+#             nn.Flatten(),
+#             nn.Linear(3136, 512),
+#             nn.ReLU(),
+#             nn.Linear(512, env.single_action_space.n),
+#         )
+
+#     def forward(self, x):
+#         return self.network(x / 255.0)
+
+class cust_CNN_Model(nn.Module):
     def __init__(self, env):
         super().__init__()
-        self.network = nn.Sequential(
+        # Define only the CNN layer
+        self.cnn = nn.Sequential(
             nn.Conv2d(4, 32, 8, stride=4),
             nn.ReLU(),
             nn.Conv2d(32, 64, 4, stride=2),
@@ -127,13 +147,23 @@ class QNetwork(nn.Module):
             nn.Conv2d(64, 64, 3, stride=1),
             nn.ReLU(),
             nn.Flatten(),
+        )
+        # Freeze the CNN backbone
+        for param in self.cnn.parameters():
+            param.requires_grad = False
+
+        # Define the Fully Connected Layers
+        self.fcc_layers = nn.Sequential(
             nn.Linear(3136, 512),
             nn.ReLU(),
-            nn.Linear(512, env.single_action_space.n),
+            nn.Linear(512, env.single_action_space.n)
         )
 
     def forward(self, x):
-        return self.network(x / 255.0)
+        x = self.cnn(x / 255.0)
+        x *= 255.0
+        x = self.fcc_layers(x / 255.0)
+        return x
 
 
 def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
@@ -141,6 +171,7 @@ def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
     return max(slope * t + start_e, end_e)
 
 
+################################### Main starts ##################################
 if __name__ == "__main__":
     import stable_baselines3 as sb3
 
@@ -155,23 +186,12 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     print("experiment name: ", args.exp_name)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-    if args.track:
-        import wandb
-
-        wandb.init(
-            project=args.wandb_project_name,
-            entity=args.wandb_entity,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            monitor_gym=True,
-            save_code=True,
-        )
-    writer = SummaryWriter(f"runs/{run_name}")
-    writer.add_text(
-        "hyperparameters",
-        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
-    )
+    
+    # writer = SummaryWriter(f"runs_cnn/{run_name}")
+    # writer.add_text(
+    #     "hyperparameters",
+    #     "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    # )
 
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
@@ -187,116 +207,18 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    q_network = QNetwork(envs).to(device)
-    optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
-    target_network = QNetwork(envs).to(device)
-    target_network.load_state_dict(q_network.state_dict())
-
-    rb = ReplayBuffer(
-        args.buffer_size,
-        envs.single_observation_space,
-        envs.single_action_space,
-        device,
-        optimize_memory_usage=True,
-        handle_timeout_termination=False,
-    )
     start_time = time.time()
 
-    # TRY NOT TO MODIFY: start the game
-    # obs, _ = envs.reset(seed=args.seed)
-    # for global_step in range(args.total_timesteps):
-    #     # ALGO LOGIC: put action logic here
-    #     epsilon = linear_schedule(args.start_e, args.end_e, args.exploration_fraction * args.total_timesteps, global_step)
-    #     if random.random() < epsilon:
-    #         actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
-    #     else:
-    #         q_values = q_network(torch.Tensor(obs).to(device))
-    #         actions = torch.argmax(q_values, dim=1).cpu().numpy()
-
-    #     # TRY NOT TO MODIFY: execute the game and log data.
-    #     next_obs, rewards, terminations, truncations, infos = envs.step(actions)
-
-    #     # TRY NOT TO MODIFY: record rewards for plotting purposes
-    #     if "final_info" in infos:
-    #         for info in infos["final_info"]:
-    #             if info and "episode" in info:
-    #                 print(f"global_step={global_step}, episodic_return={info['episode']['r']}")
-    #                 writer.add_scalar("charts/episodic_return", info["episode"]["r"], global_step)
-    #                 writer.add_scalar("charts/episodic_length", info["episode"]["l"], global_step)
-
-    #     # TRY NOT TO MODIFY: save data to reply buffer; handle `final_observation`
-    #     real_next_obs = next_obs.copy()
-    #     for idx, trunc in enumerate(truncations):
-    #         if trunc:
-    #             real_next_obs[idx] = infos["final_observation"][idx]
-    #     rb.add(obs, real_next_obs, actions, rewards, terminations, infos)
-
-    #     # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
-    #     obs = next_obs
-
-    #     # ALGO LOGIC: training.
-    #     if global_step > args.learning_starts:
-    #         if global_step % args.train_frequency == 0:
-    #             data = rb.sample(args.batch_size)
-    #             with torch.no_grad():
-    #                 target_max, _ = target_network(data.next_observations).max(dim=1)
-    #                 td_target = data.rewards.flatten() + args.gamma * target_max * (1 - data.dones.flatten())
-    #             old_val = q_network(data.observations).gather(1, data.actions).squeeze()
-    #             loss = F.mse_loss(td_target, old_val)
-
-    #             if global_step % 100 == 0:
-    #                 writer.add_scalar("losses/td_loss", loss, global_step)
-    #                 writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
-    #                 print("SPS:", int(global_step / (time.time() - start_time)))
-    #                 writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
-
-    #             # optimize the model
-    #             optimizer.zero_grad()
-    #             loss.backward()
-    #             optimizer.step()
-
-    #         # update target network
-    #         if global_step % args.target_network_frequency == 0:
-    #             for target_network_param, q_network_param in zip(target_network.parameters(), q_network.parameters()):
-    #                 target_network_param.data.copy_(
-    #                     args.tau * q_network_param.data + (1.0 - args.tau) * target_network_param.data
-    #                 )
-
-    # if args.save_model:
-    #     model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
-    #     torch.save(q_network.state_dict(), model_path)
-    #     print(f"model saved to {model_path}")
-    #     from cleanrl_utils.evals.dqn_eval import evaluate
-
-    #     episodic_returns = evaluate(
-    #         model_path,
-    #         make_env,
-    #         args.env_id,
-    #         eval_episodes=10,
-    #         run_name=f"{run_name}-eval",
-    #         Model=QNetwork,
-    #         device=device,
-    #         epsilon=0.05,
-    #     )
-    #     for idx, episodic_return in enumerate(episodic_returns):
-    #         writer.add_scalar("eval/episodic_return", episodic_return, idx)
-
-    #     if args.upload_model:
-    #         from cleanrl_utils.huggingface import push_to_hub
-
-    #         repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
-    #         repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-    #         push_to_hub(args, episodic_returns, repo_id, "DQN", f"runs/{run_name}", f"videos/{run_name}-eval")
-
-
     ############ Write the evaluate function to load the model and collect trajectories
-    print("We reached the evaluation part of the code!")
-    run_name = f"BreakoutNoFrameskip-v4__dqn_atari__1__1736379420"
-    model_path = f"runs/{run_name}/dqn_atari.cleanrl_model"
+    # run_name = f"BreakoutNoFrameskip-v4__dqn_atari__1__1736379420"
+    # model_path = f"runs/{run_name}/dqn_atari.cleanrl_model"
+    idex = 5000000
+    run_name = f"BreakoutNoFrameskip-v4__dqn_atari__multiple_10M_cnn_fcc_split"
+    model_path = f"runs_cnn/{run_name}/dqn_atari.cleanrl_model_{idex}"
     run_name = f"{run_name}-eval"
-    Model = QNetwork
+    Model = cust_CNN_Model
     epsilon=0.05
-    eval_episodes=3
+    eval_episodes=10 # number of episodes desired
     model = Model(envs).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
@@ -316,7 +238,8 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
                 q_values = model(torch.Tensor(obs).to(device))
                 actions = torch.argmax(q_values, dim=1).cpu().numpy()
             next_obs, rewards, terminations, truncations, infos = envs.step(actions)
-            episode_trajectory.append((obs, actions, rewards, next_obs, terminations))
+            episode_trajectory.append((obs, actions, rewards, next_obs, terminations)) # figure out how to include episodic returns also
+
             if "final_info" in infos:
                 for info in infos["final_info"]:
                     if "episode" not in info:
@@ -333,8 +256,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
 
     ### Now we store the trajectories
     import pickle
-    file_name = f""
-    with open("trajectories.pkl", "wb") as f:
+    with open("trajectories_new.pkl", "wb") as f:
         pickle.dump(trajectories, f)  # Save
 
     # # When loading the trajectories 
@@ -342,10 +264,10 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     #     loaded_trajectory = pickle.load(f)  # Load
 
     # # Another methods to save using .npy
-    np.save("trajectories.npy", np.array(trajectories, dtype=object))
+    np.save("trajectories_new.npy", np.array(trajectories, dtype=object))
 
 
     end_time = time.time()
     print("Total time taken = %.6f seconds " %(end_time - start_time))
     envs.close()
-    writer.close()
+    # writer.close()

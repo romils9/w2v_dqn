@@ -59,15 +59,15 @@ class Args:
     env_id: str = "BreakoutNoFrameskip-v4"
     # env_id: str = "PongNoFrameskip-v4"
     """the id of the environment"""
-    # total_timesteps: int = 10_000_000
-    total_timesteps: int = 150_000
+    total_timesteps: int = 9_000_000
+    # total_timesteps: int = 150_000
     """total timesteps of the experiments"""
     learning_rate: float = 1e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    # buffer_size: int = 1_000_000
-    buffer_size: int = 100_000
+    buffer_size: int = 1_000_000
+    # buffer_size: int = 100_000
     """the replay memory buffer size"""
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -81,13 +81,15 @@ class Args:
     """the starting epsilon for exploration"""
     end_e: float = 0.01
     """the ending epsilon for exploration"""
-    exploration_fraction: float = 0.10
+    exploration_fraction: float = 0.01 # generally kept at 0.10
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
-    learning_starts: int = 80000
+    learning_starts: int = 90000 # generally 80k
     """timestep to start learning"""
     train_frequency: int = 4
     """the frequency of training"""
 
+run_folder = f"runs_cnn"
+idex = 1000000
 
 def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
@@ -171,7 +173,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(f"{run_folder}/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -193,16 +195,17 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
 
     # Create an instance of the Agent class and loading it with the appropriate weights
     temp_model = cust_CNN_Model(envs).to(device)
-    run_name_2 = f"BreakoutNoFrameskip-v4__dqn_atari__10M_cnn_fcc_split"
-    saved_model_path = f"runs/{run_name_2}/dqn_atari.cleanrl_model"
-    temp_model.load_state_dict(torch.load(saved_model_path, map_location=device))
+    run_name_2 = f"BreakoutNoFrameskip-v4__dqn_atari__multiple_10M_cnn_fcc_split"
+    saved_model_path = f"{run_folder}/{run_name_2}/dqn_atari.cleanrl_model_{idex}"
+    # temp_model.load_state_dict(torch.load(saved_model_path, map_location=device))
     q_network = cust_CNN_Model(envs).to(device)
+    q_network.load_state_dict(torch.load(saved_model_path, map_location=device))
 
-    # Loading the q_network's CNN weights
-    cnn_state_dict = {k: v for k, v in temp_model.state_dict().items() if "cnn" in k}
-    fcc_state_dict = {k: v for k, v in q_network.state_dict().items() if "fcc_layers" in k}
-    merged_state_dict = {**cnn_state_dict, **fcc_state_dict}
-    q_network.load_state_dict(merged_state_dict, strict=True) # Loads the CNN weights but not the FCL
+    # # Loading the q_network's CNN weights
+    # cnn_state_dict = {k: v for k, v in temp_model.state_dict().items() if "cnn" in k}
+    # fcc_state_dict = {k: v for k, v in q_network.state_dict().items() if "fcc_layers" in k}
+    # merged_state_dict = {**cnn_state_dict, **fcc_state_dict}
+    # q_network.load_state_dict(merged_state_dict, strict=True) # Loads the CNN weights but not the FCL
     
     optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
     # target_network = QNetwork(envs).to(device)
@@ -283,7 +286,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
                     )
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = f"{run_folder}/{run_name}/{args.exp_name}.cleanrl_model_{idex}"
         torch.save(q_network.state_dict(), model_path)
         print(f"model saved to {model_path}")
         from cleanrl_utils.evals.dqn_eval import evaluate
