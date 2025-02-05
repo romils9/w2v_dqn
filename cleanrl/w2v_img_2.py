@@ -10,6 +10,7 @@ import numpy as np
 import random
 import hashlib
 import time
+import os
 
 
 
@@ -445,6 +446,14 @@ if __name__ == "__main__":
     
     run_name = "Breakoutv4_w2v_img_5M_cnn_trajectories_new"
     model_path = f"{run_folder}/{run_name}/w2v.cleanrl_model_{idex}"
+    log_dir = f"{run_folder}/{run_name}"
+    # Create the directory
+    os.makedirs(log_dir, exist_ok=True)
+    if os.path.exists(log_dir):
+        print(f"The directory {log_dir} exists.")
+    else:
+        print(f"Failed to create the directory {log_dir}.")
+    
     torch.save(model.state_dict(), model_path)
 
     # Extract a refined embedding for a sample image.
