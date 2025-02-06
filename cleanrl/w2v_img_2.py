@@ -66,7 +66,7 @@ def get_context(idx, val, num_images, window_size = 2):
         context_indices_2 = a_3
     # end if for actions
 
-    context_indices_3 = list(range(list(range(max(0, idx - 5*window_size), min(num_images, idx + 5*window_size + 1)))))
+    context_indices_3 = list(range(max(0, idx - 5*window_size), min(num_images, idx + 5*window_size + 1)))
     
     context_indices = list(set(context_indices_1) & set(context_indices_2) & set(context_indices_3))
 
@@ -107,8 +107,10 @@ class ImageSkipGramDataset(Dataset):
 
         # Obtaining context of the target image using a heuristic obtained from get_context()
         context_indices = self.get_context(idx = idx, val = self.val, num_images=self.num_images, window_size=self.window_size)
+        # print("context_indices = ", context_indices)
+        # print("\n\n")
 
-        if len(context_indices)==0:
+        if len(context_indices)<=1:
             context_indices = list(range(max(0, idx - self.window_size), 
                                      min(self.num_images, idx + self.window_size + 1)))
             
@@ -274,6 +276,7 @@ def train_model(images, val, embed_size=512, window_size=2, epochs=10, batch_siz
     data_total_time = time.time() - data_time_start
     print(f"Total time to create dataset and dataloader = {data_total_time:.2f} seconds ")
     
+    # model = ImageSkipGramModel(embed_size, freeze_pretrained=not fine_tune).to(device)
     model = ImageSkipGramModel(embed_size, freeze_pretrained=not fine_tune)
     cnn_state_dict = {k: v for k, v in q_network.state_dict().items() if "cnn" in k}
 
@@ -378,6 +381,7 @@ def get_img(): # Here the return variable needs to be adjusted - vec1 only gives
             v = np.max(q_op)
             val.append((v,a)) # to store the Value function and action chosen in current state
             vec1.append(obs)
+            # vec1.append(torch.Tensor(obs).to(device))
     
     return vec1, val
 
@@ -444,7 +448,7 @@ if __name__ == "__main__":
     # Train the model; set fine_tune=True to allow the CNN to update.
     model = train_model(images, val, embed_size=3136, fine_tune=True)
     
-    run_name = "Breakoutv4_w2v_img_5M_cnn_trajectories_new"
+    run_name = "Breakoutv4_w2v_img_similarity_5M_cnn_trajectories_new"
     model_path = f"{run_folder}/{run_name}/w2v.cleanrl_model_{idex}"
     log_dir = f"{run_folder}/{run_name}"
     # Create the directory
