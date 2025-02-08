@@ -60,41 +60,55 @@ def safe_transform(img):
     raise ValueError("Image must be either a numpy array or torch.Tensor")
 
 
-# def get_context(idx, val, num_images, window_size = 2):
-#     # context_indices = []
-#     if val[idx][0]<=5:
-#         context_indices_1 = val_5
-#     elif val[idx][0]<=6:
-#         context_indices_1 = val_6
-#     elif val[idx][0]<=7:
-#         context_indices_1 = val_7
-#     elif val[idx][0]<=8:
-#         context_indices_1 = val_8
-#     elif val[idx][0]<=9:
-#         context_indices_1 = val_9
-#     else:
-#         context_indices_1 = val_high
-#     # end if for value func
+def get_context(idx, val, num_images, window_size = 2):
+    window_thresh = 10*window_size
+    if val[idx][0]<=5:
+        context_indices_1 = val_5
+    elif val[idx][0]<=6:
+        context_indices_1 = val_6
+    elif val[idx][0]<=7:
+        context_indices_1 = val_7
+    elif val[idx][0]<=8:
+        context_indices_1 = val_8
+    elif val[idx][0]<=9:
+        context_indices_1 = val_9
+    else:
+        context_indices_1 = val_high
+    # end if for value func
     
-#     if val[idx][1]==0:
-#         context_indices_2 = a_0
-#     elif val[idx][1]==1:
-#         context_indices_2 = a_1
-#     elif val[idx][1]==2:
-#         context_indices_2 = a_2
-#     else:
-#         context_indices_2 = a_3
-#     # end if for actions
+    if val[idx][1]==0:
+        context_indices_2 = a_0
+    elif val[idx][1]==1:
+        context_indices_2 = a_1
+    elif val[idx][1]==2:
+        context_indices_2 = a_2
+    else:
+        context_indices_2 = a_3
+    # end if for actions
 
-#     context_indices_3 = list(range(max(0, idx - 5*window_size), min(num_images, idx + 5*window_size + 1)))
+    context_indices_3 = list(range(max(0, idx - window_thresh), min(num_images, idx + window_thresh + 1)))
     
-#     context_indices = list(set(context_indices_1) & set(context_indices_2) & set(context_indices_3))
+    context_indices = list(set(context_indices_1) & set(context_indices_2) & set(context_indices_3))
 
-#     # if len(context_indices)==0:
-#     #     return [] # return an 
-#     # else:
-#     #     return context_indices
-#     return context_indices # may return an empty list
+    if idx in context_indices:
+            context_indices.remove(idx)
+
+    if len(context_indices)<4:
+        num_samples = 4 - len(context_indices)
+        temp_list = list(set(context_indices_1) & set(context_indices_2) - {idx})
+        if len(temp_list)>=num_samples:
+            new_context = list(set(temp_list) - set(context_indices))
+        else:
+            new_context = list(set(context_indices_3) - set(context_indices) - {idx})
+        # end if for list selection
+        temp = random.sample(new_context, num_samples)
+        context_indices = list(set(temp) | set(context_indices))
+    # end context_len if
+
+    # Now we compute the neg_samples
+    neg_indices = list(set(range(num_images)) - set(context_indices_1) - set(context_indices_2) - set(context_indices_3))
+    
+    return context_indices, neg_indices
 
 
 class ImageSkipGramDataset(Dataset):
@@ -150,9 +164,9 @@ class ImageSkipGramDataset(Dataset):
         self.num_contexts = num_contexts
         self.num_images = len(images)
         self.transform = safe_transform
-        # self.get_context = get_context # send idx, val, self.num_images, self.window_size
-        self.contexts = img_contexts
-        self.negs = img_negs
+        self.get_context = get_context # send idx, val, self.num_images, self.window_size
+        # self.contexts = img_contexts
+        # self.negs = img_negs
 
     def __len__(self):
         return self.num_images
@@ -160,33 +174,22 @@ class ImageSkipGramDataset(Dataset):
     def __getitem__(self, idx):
         # Apply the transformation to the target image.
         target = self.transform(self.image_list[idx])  # Expected shape: (4,84,84)
-        
-        # Determine context indices (neighbors in the list excluding the target itself).
-        # context_indices = list(range(max(0, idx - self.window_size), 
-        #                              min(self.num_images, idx + self.window_size + 1)))
 
         # Obtaining context of the target image using a heuristic obtained from get_context()
-        # context_indices = self.get_context(idx = idx, val = self.val, num_images=self.num_images, window_size=self.window_size)
-
-        # if len(context_indices)<=1:
-        #     context_indices = list(range(max(0, idx - self.window_size), 
-        #                              min(self.num_images, idx + self.window_size + 1)))
-            
-        # context_idx = random.choice(context_indices)
-        # context = self.transform(self.image_list[context_idx])
-        
-        # Negative sampling: choose negatives from images not in the context window nor the target.
-        # negative_indices = list(set(range(self.num_images)) - set(context_indices) - {idx})
-        # if len(negative_indices) < self.num_neg_samples:
-        #     negative_samples = negative_indices
-        # else:
-        #     negative_samples = random.sample(negative_indices, self.num_neg_samples)
-        # negatives = torch.stack([self.transform(self.image_list[i]) for i in negative_samples])
-        context_idx = random.sample(self.contexts[idx], self.num_contexts)
+        context_indices, neg_indices = self.get_context(idx = idx, val = self.val, 
+                                                        num_images=self.num_images, window_size=self.window_size)
+        context_idx = random.sample(context_indices, self.num_contexts)
         context = torch.stack([self.transform(self.image_list[i]) for i in context_idx])
 
-        negative_samples = random.sample(self.negs[idx], self.num_neg_samples)
+        negative_samples = random.sample(neg_indices, self.num_neg_samples)
         negatives = torch.stack([self.transform(self.image_list[i]) for i in negative_samples])
+
+        # # When self.contexts and self.negs is available i.e. storage of indices works
+        # context_idx = random.sample(self.contexts[idx], self.num_contexts)
+        # context = torch.stack([self.transform(self.image_list[i]) for i in context_idx])
+
+        # negative_samples = random.sample(self.negs[idx], self.num_neg_samples)
+        # negatives = torch.stack([self.transform(self.image_list[i]) for i in negative_samples])
         
         return target, context, negatives
 
@@ -224,14 +227,17 @@ class cust_CNN_Model(nn.Module):
         x = self.fcc_layers(x / 255.0)
         return x
 
-idex = 5000000 # Using the 5M model
-run_folder = f"runs_cnn"
-device = "cuda"
-run_name_2 = f"BreakoutNoFrameskip-v4__dqn_atari__multiple_10M_cnn_fcc_split"
-saved_model_path = f"{run_folder}/{run_name_2}/dqn_atari.cleanrl_model_{idex}"
-# q_network = cust_CNN_Model(envs).to(device)
-q_network = cust_CNN_Model().to(device)
-q_network.load_state_dict(torch.load(saved_model_path, map_location=device))
+# idex = 5000000 # Using the 5M model
+# run_folder = f"runs_cnn"
+# device = "cuda"
+# run_name_2 = f"BreakoutNoFrameskip-v4__dqn_atari__multiple_10M_cnn_fcc_split"
+# saved_model_path = f"{run_folder}/{run_name_2}/dqn_atari.cleanrl_model_{idex}"
+# # q_network = cust_CNN_Model(envs).to(device)
+# q_network = cust_CNN_Model().to(device)
+# q_network.load_state_dict(torch.load(saved_model_path, map_location=device))
+
+###################################################
+
 
 # class ImageEmbeddingExtractor(nn.Module):
 #     def __init__(self, embed_size=512):
@@ -290,7 +296,8 @@ class ImageSkipGramModel(nn.Module):
         )
         # Optionally freeze the pretrained CNN layers
         if freeze_pretrained:
-            for param in self.encoder.parameters():
+            # for param in self.encoder.parameters():
+            for param in self.cnn.parameters():
                 param.requires_grad = False
                 
         # An output layer that further transforms embeddings (for context prediction)
@@ -344,7 +351,7 @@ def load_model(model, cnn_state_dict):
 # ===============================
 # Training Loop
 # ===============================
-def train_model(images, img_contexts, img_negs, embed_size=512, window_size=2, epochs=10, batch_size=16, lr=0.001, num_contexts = 4, num_neg_samples=5, fine_tune=False):
+def train_model(images, img_contexts, img_negs, cnn_state_dict, embed_size=512, window_size=2, epochs=10, batch_size=16, lr=0.001, num_contexts = 4, num_neg_samples=5, fine_tune=False):
     """
     images: List of PIL Image objects (84x84)
     fine_tune: If True, allows the pretrained CNN to be updated during training.
@@ -356,12 +363,6 @@ def train_model(images, img_contexts, img_negs, embed_size=512, window_size=2, e
     
     # model = ImageSkipGramModel(embed_size, freeze_pretrained=not fine_tune).to(device)
     model = ImageSkipGramModel(embed_size, freeze_pretrained=not fine_tune)
-    cnn_state_dict = {k: v for k, v in q_network.state_dict().items() if "cnn" in k}
-
-    # Now we delete the q_network to make space in the memory
-    del q_network
-    gc.collect()
-
     model = load_model(model = model, cnn_state_dict=cnn_state_dict) # Loads the CNN weights but not the w2v layer
     optimizer = optim.Adam(model.parameters(), lr=lr)
     
@@ -462,7 +463,7 @@ Information about traj:
 8. Thus to iterate over the states in a single episode, ** traj[0][i][0] iterate over i **
 '''
 
-def get_img(traj_name): # Here the return variable needs to be adjusted - vec1 only gives values for 1 dones
+def get_img(traj_name, model): # Here the return variable needs to be adjusted - vec1 only gives values for 1 dones
     vec1 = []
     val = []
     traj = np.load(f"{traj_name}.npy", allow_pickle= True)
@@ -471,7 +472,8 @@ def get_img(traj_name): # Here the return variable needs to be adjusted - vec1 o
         print("Current episode = ", i+1)
         for idx in range(len(traj[i]))[1:]:
             obs = traj[i][idx][0]
-            q_op = q_network(torch.Tensor(obs).to(device))
+            # q_op = q_network(torch.Tensor(obs).to(device))
+            q_op = model(torch.Tensor(obs).to(device))
             q_op = q_op.cpu().detach().numpy()
             a = np.argmax(q_op)
             v = np.max(q_op)
@@ -634,6 +636,17 @@ def store_context(images, val, window_size = 2):
 # Main: Running the Training
 # ===============================
 if __name__ == "__main__":
+    # Define the CNN model
+    idex = 5000000 # Using the 5M model
+    run_folder = f"runs_cnn"
+    device = "cuda"
+    run_name_2 = f"BreakoutNoFrameskip-v4__dqn_atari__multiple_10M_cnn_fcc_split"
+    saved_model_path = f"{run_folder}/{run_name_2}/dqn_atari.cleanrl_model_{idex}"
+    # q_network = cust_CNN_Model(envs).to(device)
+    q_network = cust_CNN_Model().to(device)
+    q_network.load_state_dict(torch.load(saved_model_path, map_location=device))
+    cnn_state_dict = {k: v for k, v in q_network.state_dict().items() if "cnn" in k}
+
     traj_name = "trajectories_new"
     # cleaned_data_path = f"trajectories/cleaned_{traj_name}"
 
@@ -660,11 +673,12 @@ if __name__ == "__main__":
     # traj = np.load(f"{traj_name}.npy", allow_pickle= True)
     # images, val = get_img(traj=traj)
     log_memory_usage("Memory Before trajectory loading")
-    images, val = get_img(traj_name)
+    images, val = get_img(traj_name, model = q_network)
     print("Images and val computed successfully")
 
     clean_memory = False # True: will delete images, val variables to clear out memory
     deduplication = False # False: We don't mind duplication of images, True: We use the hashing to remove duplicates
+    store_context_boolean = False
     '''
     The deduplication still needs to be checked to ensure that post hashing we don't loss imp information about 
     neighbours in the context_indices computation
@@ -682,6 +696,7 @@ if __name__ == "__main__":
         if clean_memory:
             del(images)
             del(val)
+            
             gc.collect()
             # del(traj)
         # end memory if
@@ -689,30 +704,39 @@ if __name__ == "__main__":
         img_contexts, img_negs = store_context(clean_images, val_list, window_size = 2)
         # Train the model; set fine_tune=True to allow the CNN to update.
         # model = train_model(images = clean_images, val = val_list, embed_size=3136, fine_tune=False)
-        model = train_model(images = clean_images, img_contexts = img_contexts, img_negs = img_negs, 
-                            embed_size=embed_dim, batch_size=batch, num_contexts = context_len, num_neg_samples=neg_len, fine_tune=False)
+        model = train_model(images = clean_images, img_contexts = img_contexts, img_negs = img_negs,
+                             cnn_state_dict=cnn_state_dict, embed_size=embed_dim, batch_size=batch, 
+                            num_contexts = context_len, num_neg_samples=neg_len, fine_tune=False)
 
     else:
         log_memory_usage("Before context criteria i.e. list of vals & a created")
         val_5, val_6, val_7, val_8, val_9, val_high, a_0, a_1, a_2, a_3 = context_create(val=val)
         print("All the criteria lists created")
         
-        log_memory_usage("Before storing of contexts created")
-        img_contexts, img_negs = store_context(images, val, window_size = 2)
-        print("All the contexts and negatives are computed and stored")
-        # Search if there are any negatives in img_contexts:
-        print("Negative values check: ")
-        for idx in range(len(images)):
-            temp = np.where(np.array(img_contexts[idx])<0)[0]
-            if len(temp)>0:
-                print(f"Negative index found at {idx}: indices = {img_contexts[idx]}")
-            else:
-                # print(f"img_contexts[{idx}]: {img_contexts[idx]}")
-                continue
+        if store_context_boolean:
+            # When storing the image memory
+            log_memory_usage("Before storing of contexts created")
+            img_contexts, img_negs = store_context(images, val, window_size = 2)
+            print("All the contexts and negatives are computed and stored")
+            # Search if there are any negatives in img_contexts:
+            print("Negative values check: ")
+            for idx in range(len(images)):
+                temp = np.where(np.array(img_contexts[idx])<0)[0]
+                if len(temp)>0:
+                    print(f"Negative index found at {idx}: indices = {img_contexts[idx]}")
+                    assert False, "Only +ve integer indices are accepted"
+                else:
+                    # print(f"img_contexts[{idx}]: {img_contexts[idx]}")
+                    continue
 
-        # assert False, "Checking indices"
-        # Train the model; set fine_tune=True to allow the CNN to update.
-        model = train_model(images, img_contexts, img_negs, embed_size=embed_dim, batch_size=batch, num_contexts = context_len,
+            # assert False, "Checking indices"
+            
+            # Train the model; set fine_tune=True to allow the CNN to update.
+            model = train_model(images, img_contexts, img_negs, cnn_state_dict=cnn_state_dict, embed_size=embed_dim, batch_size=batch, num_contexts = context_len,
+                                num_neg_samples=neg_len, fine_tune=False)
+        else:
+            # Train the model; set fine_tune=True to allow the CNN to update.
+            model = train_model(images, img_contexts = [], img_negs = [], cnn_state_dict=cnn_state_dict, embed_size=embed_dim, batch_size=batch, num_contexts = context_len,
                              num_neg_samples=neg_len, fine_tune=False)
     
     
