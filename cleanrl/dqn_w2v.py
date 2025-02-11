@@ -49,15 +49,15 @@ class Args:
     capture_video: bool = True
     """whether to capture videos of the agent performances (check out `videos` folder)"""
     save_model: bool = True
-    """whether to save model into the `runs/{run_name}` folder"""
+    """whether to save model into the `{run_file}/{run_name}` folder"""
     upload_model: bool = False
     """whether to upload the saved model to huggingface"""
     hf_entity: str = ""
     """the user or org name of the model repository from the Hugging Face Hub"""
 
     # Algorithm specific arguments
-    # env_id: str = "BreakoutNoFrameskip-v4"
-    env_id: str = "PongNoFrameskip-v4"
+    env_id: str = "BreakoutNoFrameskip-v4"
+    # env_id: str = "PongNoFrameskip-v4"
     """the id of the environment"""
     total_timesteps: int = 1_000_000
     """total timesteps of the experiments"""
@@ -79,7 +79,7 @@ class Args:
     """the starting epsilon for exploration"""
     end_e: float = 0.01
     """the ending epsilon for exploration"""
-    exploration_fraction: float = 0.10
+    exploration_fraction: float = 0.08
     """the fraction of `total-timesteps` it takes from start-e to go end-e"""
     learning_starts: int = 80000
     """timestep to start learning"""
@@ -142,11 +142,39 @@ class cust_CNN_Model(nn.Module):
         x = self.fcc_layers(x / 255.0)
         return x
 
+###########################################################################
+# Define the w2v model for loading the state dictionary
+###########################################################################
+
+class w2v_structure(nn.Module):
+    def __init__(self, embed_dim = 3136):
+        super().__init__()
+        # Define only the CNN layer
+        self.cnn = nn.Sequential(
+            nn.Conv2d(4, 32, 8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, 3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+        )
+        # Freeze the CNN backbone
+        for param in self.cnn.parameters():
+            param.requires_grad = False
+
+        # Add a new trainable linear layer
+        self.output_layer = nn.Linear(3136, embed_dim)  # Input size matches the Flatten output of the CNN
+
+    def forward(self, x):
+        x = self.cnn(x / 255.0)
+        x = self.output_layer(x)
+        return x
 
 ###########################################################################
 # Define the modified QNetwork to include w2v layers
 class cust_w2v_model(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env, embed_dim = 3136):
         super().__init__()
         # Define only the CNN layer
         self.cnn = nn.Sequential(
@@ -164,7 +192,7 @@ class cust_w2v_model(nn.Module):
 
         # Add a new trainable linear layer
         self.w2v = nn.Sequential(
-            nn.Linear(3136, 128),  # Input size matches the Flatten output of the CNN
+            nn.Linear(3136, embed_dim),  # Input size matches the Flatten output of the CNN
             nn.ReLU()
         )
         for param in self.w2v.parameters():
@@ -172,7 +200,7 @@ class cust_w2v_model(nn.Module):
 
         # Define the Fully Connected Layers
         self.fcc_layers = nn.Sequential(
-            nn.Linear(128, 512),
+            nn.Linear(embed_dim, 512),
             nn.ReLU(),
             nn.Linear(512, env.single_action_space.n)
         )
@@ -201,6 +229,8 @@ if __name__ == "__main__":
 poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-license]==0.28.1"  "ale-py==0.8.1" 
 """
         )
+    idex = 5000000
+    run_file = "runs_cnn"
     args = tyro.cli(Args)
     print("experiment name: ", args.exp_name)
     assert args.num_envs == 1, "vectorized envs are not supported at the moment"
@@ -217,7 +247,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     #         monitor_gym=True,
     #         save_code=True,
     #     )
-    writer = SummaryWriter(f"runs/{run_name}")
+    writer = SummaryWriter(f"{run_file}/{run_name}")
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -238,47 +268,58 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
     # Create an instance of the Agent class and loading it with the appropriate weights
-    temp_model = cust_w2v_model(envs).to(device)
-    run_name_w2v = f"BreakoutNoFrameskip-v4__dqn_w2v__10M_cnn_128_w2v_split"
-    saved_model_path = f"runs/{run_name_w2v}/dqn_w2v.cleanrl_model"
+    temp_model = cust_CNN_Model(envs).to(device)
+    run_name_w2v = f"BreakoutNoFrameskip-v4__dqn_atari__multiple_10M_cnn_fcc_split"
+    saved_model_path = f"{run_file}/{run_name_w2v}/dqn_atari.cleanrl_model_5000000"
     temp_model.load_state_dict(torch.load(saved_model_path, map_location=device))
-
-    # q_network = cust_w2v_model(envs).to(device)
-
-    # # Loading the CNN+w2v part of the model
-    # cnn_state_dict = {k: v for k, v in temp_model.state_dict().items() if "cnn" in k}
-    # w2v_state_dict_2 = {k: v for k, v in temp_model.state_dict().items() if "w2v" in k}
-    # fcc_state_dict = {k: v for k, v in q_network.state_dict().items() if "fcc_layers" in k}
-    # merged_state_dict = {**cnn_state_dict, **w2v_state_dict_2, **fcc_state_dict}
-    # q_network.load_state_dict(merged_state_dict, strict=True) # Loads the CNN weights but not the FCL
-    
-    # optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
-    # # target_network = QNetwork(envs).to(device)
-    # target_network = cust_w2v_model(envs).to(device)
-    # target_network.load_state_dict(q_network.state_dict())
-
-    # print("Q network model: ", q_network)
+    keys_temp = list(temp_model.state_dict().keys())
+    # print("cust CNN model keys: ", keys_temp)
 
     ####################################
-    cnn_og_model = cust_CNN_Model(envs).to(device)
-    run_name_2 = f"BreakoutNoFrameskip-v4__dqn_atari__10M_cnn_fcc_split"
-    saved_model_path = f"runs/{run_name_2}/dqn_atari.cleanrl_model"
-    cnn_og_model.load_state_dict(torch.load(saved_model_path, map_location=device))
+    w2v_og_model = w2v_structure(embed_dim=3136).to(device)
+    run_name_2 = f"Breakoutv4_w2v_img_similarity_5M_cnn_trajectories_new_2"
+    saved_model_path = f"{run_file}/{run_name_2}/w2v.cleanrl_model_5000000"
+    keys_og = list(w2v_og_model.state_dict().keys())
+    # print("keys present in w2v: ", keys_og)
 
-    keys_og = list(cnn_og_model.state_dict().keys())
-    keys_q = list(temp_model.state_dict().keys())
+    # assert False, "Weight check"
+    w2v_og_model.load_state_dict(torch.load(saved_model_path, map_location=device))
+
+    # keys_og = list(w2v_og_model.state_dict().keys())
+    # key_temp = list(temp_model.state_dict().keys())
 
     print("The keys of both networks are: ")
-    print("QNetwork: ", keys_og)
-    print("w2v induced: ", keys_q)
+    print("w2v only model with cnn: ", keys_og)
+    print("custom_cnn_model: ", keys_temp)
 
     print("Checking the weights matching between OG and new model")
     for idx in range(len(keys_og)):
-        equal = torch.equal(temp_model.state_dict()[keys_q[idx]], cnn_og_model.state_dict()[keys_og[idx]])
-        print(f"Layer {idx+1} i.e. {keys_q[idx]} and {keys_og[idx]}: {'Equal' if equal else 'Not Equal'}")
+        equal = torch.equal(temp_model.state_dict()[keys_temp[idx]], w2v_og_model.state_dict()[keys_og[idx]])
+        print(f"Layer {idx+1} i.e. {keys_temp[idx]} and {keys_og[idx]}: {'Equal' if equal else 'Not Equal'}")
 
+    print("Now that we've verified that the models are loaded correctly, we will load the w2v_structure and start training")
 
-    assert False, "Weight check"
+    q_network = cust_w2v_model(envs).to(device)
+    q_states = q_network.state_dict()
+    keys_q = list(q_states.keys())
+
+    for idx in range(len(keys_og)):
+        if q_states[keys_q[idx]].shape == w2v_og_model.state_dict()[keys_og[idx]].shape:
+            q_states[keys_q[idx]] = w2v_og_model.state_dict()[keys_og[idx]]
+            print(f"Current key: {keys_og[idx]} successful")
+        else:
+            print("Shape mismatch occured!")
+            break
+    # end for
+    q_network.load_state_dict(q_states, strict=True) # Loads CNN and w2v layer weights but keeps fcc layer same as initial
+
+    optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
+    target_network = cust_w2v_model(envs).to(device)
+    target_network.load_state_dict(q_network.state_dict())
+
+    print("Q network model: ", q_network)
+
+    # assert False, "Weight check"
 
     rb = ReplayBuffer(
         args.buffer_size,
@@ -351,7 +392,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
                     )
 
     if args.save_model:
-        model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
+        model_path = f"{run_file}/{run_name}/{args.exp_name}.cleanrl_model"
         torch.save(q_network.state_dict(), model_path)
         print(f"model saved to {model_path}")
         from cleanrl_utils.evals.dqn_eval import evaluate
@@ -385,7 +426,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
 
             repo_name = f"{args.env_id}-{args.exp_name}-seed{args.seed}"
             repo_id = f"{args.hf_entity}/{repo_name}" if args.hf_entity else repo_name
-            push_to_hub(args, episodic_returns, repo_id, "DQN", f"runs/{run_name}", f"videos/{run_name}-eval")
+            push_to_hub(args, episodic_returns, repo_id, "DQN", f"{run_file}/{run_name}", f"videos/{run_name}-eval")
 
     envs.close()
     writer.close()

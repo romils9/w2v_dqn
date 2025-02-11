@@ -301,21 +301,31 @@ class ImageSkipGramModel(nn.Module):
                 param.requires_grad = False
                 
         # An output layer that further transforms embeddings (for context prediction)
-        self.output_layer = nn.Linear(3136, embed_size)
+        # self.w2v = nn.Linear(3136, embed_size) # Forgot to add the nn.Relu() here or nn.Sigmoid()
+        # with torch.no_grad(): # this step initializes the weights to identity matrix
+        #     # This ensures initial output of w2v matches that of the encoder
+        #     self.w2v.weight.copy_(torch.eye(embed_size))  # Identity matrix
+        #     self.w2v.bias.fill_(0)  # Zero bias
+
+        # An output layer that further transforms embeddings (for context prediction)
+        self.w2v = nn.Sequential(
+            nn.Linear(3136, embed_dim),  # Input size matches the Flatten output of the CNN
+            nn.ReLU()
+        )
         with torch.no_grad(): # this step initializes the weights to identity matrix
-            # This ensures initial output of output_layer matches that of the encoder
-            self.output_layer.weight.copy_(torch.eye(embed_size))  # Identity matrix
-            self.output_layer.bias.fill_(0)  # Zero bias
+            # This ensures initial output of w2v matches that of the encoder
+            self.w2v.weight.copy_(torch.eye(embed_size))  # Identity matrix
+            self.w2v.bias.fill_(0)  # Zero bias
     
     def forward(self, target_img):
         # Generate the embedding for an input image
         # target_embedding = self.encoder(target_img)
         target_embedding = self.cnn(target_img / 255.0)
         # target_embedding *= 255.0
-        # target_embedding = self.output_layer(target_embedding / 255.0) # this creates a copy of the target_embeddings
+        # target_embedding = self.w2v(target_embedding / 255.0) # this creates a copy of the target_embeddings
 
         # Since the target layer is a single layer. Hence, we don't need to normalize it's input.
-        target_embedding = self.output_layer(target_embedding) # this creates a copy of the target_embeddings
+        target_embedding = self.w2v(target_embedding) # this creates a copy of the target_embeddings
         return target_embedding
     
     # def loss_function(self, pos_scores, neg_scores):
@@ -370,13 +380,13 @@ def train_model(images, img_contexts, img_negs, cnn_state_dict, embed_size=512, 
     total_training_start = time.time()  # Start timing overall training
     for epoch in range(epochs):
         # print(f"Epoch {epoch+1} started!")
-        log_memory_usage(f"Epoch {epoch+1} - Before Training")
+        # log_memory_usage(f"Epoch {epoch+1} - Before Training")
         epoch_start = time.time()  # Start timing for this epoch
         total_loss = 0.0
         # flag = True
         count = 0
         for target, context, negatives in dataloader:
-            log_memory_usage(f"Epoch {epoch+1}, Batch {count+1} - Before Forward Pass")
+            # log_memory_usage(f"Epoch {epoch+1}, Batch {count+1} - Before Forward Pass")
             # print(f"Time taken by dataloader = {(dataloader_time - epoch_start):.2f} seconds ")
             optimizer.zero_grad()
             
@@ -400,7 +410,7 @@ def train_model(images, img_contexts, img_negs, cnn_state_dict, embed_size=512, 
             '''# Older method'''
             # pos_scores = pos_scores.mean(dim=1)  # Shape: [B]
             '''# Newer method'''
-            pos_loss = F.softplus(-pos_scores).mean(dim=1)
+            pos_loss = F.softplus(-pos_scores).mean(dim=1) # New shape = [B]
             
 
             # Process negatives individually.
@@ -420,7 +430,7 @@ def train_model(images, img_contexts, img_negs, cnn_state_dict, embed_size=512, 
             neg_scores = (target_embedding.unsqueeze(1) * negative_embeddings).sum(dim=2) # shape = [B, N] since sum(dim=2) completes the dot product
             neg_loss = F.softplus(neg_scores).mean(dim=1) # this computes the softplus and sums all the values for a given target
             
-            log_memory_usage(f"Epoch {epoch+1}, Batch {count+1} - After Forward Pass")
+            # log_memory_usage(f"Epoch {epoch+1}, Batch {count+1} - After Forward Pass")
 
             # Compute loss and update
             '''# Older method'''
@@ -428,19 +438,18 @@ def train_model(images, img_contexts, img_negs, cnn_state_dict, embed_size=512, 
             '''# Newer method'''
             loss = pos_loss.mean() + neg_loss.mean() # this computes the mean pos loss and mean negative loss per
 
-            log_memory_usage(f"Epoch {epoch+1}, Batch {count+1} - Before Backward Pass")
+            # log_memory_usage(f"Epoch {epoch+1}, Batch {count+1} - Before Backward Pass")
 
             loss.backward()
             optimizer.step()
 
-            log_memory_usage(f"Epoch {epoch+1}, Batch {count+1} - After Backward Pass")
+            # log_memory_usage(f"Epoch {epoch+1}, Batch {count+1} - After Backward Pass")
 
             total_loss += loss.item()
-            count+=1
         
         # torch.cuda.synchronize()
         epoch_time = time.time() - epoch_start  # Calculate epoch duration
-        log_memory_usage(f"Epoch {epoch+1} - After Training")
+        # log_memory_usage(f"Epoch {epoch+1} - After Training")
         print(f"Epoch {epoch+1} completed in {epoch_time:.2f} seconds, Loss: {total_loss:.4f}")
     
     total_training_time = time.time() - total_training_start # Calculate total time taken
@@ -645,7 +654,14 @@ if __name__ == "__main__":
     # q_network = cust_CNN_Model(envs).to(device)
     q_network = cust_CNN_Model().to(device)
     q_network.load_state_dict(torch.load(saved_model_path, map_location=device))
-    cnn_state_dict = {k: v for k, v in q_network.state_dict().items() if "cnn" in k}
+    # cnn_state_dict = {k: v for k, v in q_network.state_dict().items() if "cnn" in k}
+
+    # We use 1M trained CNN for training w2v
+    idex_2 = 1000000
+    saved_model_path_load = f"{run_folder}/{run_name_2}/dqn_atari.cleanrl_model_{idex_2}" # using the 1M model as baseline
+    q_1m_model = cust_CNN_Model().to(device)
+    q_1m_model.load_state_dict(torch.load(saved_model_path, map_location=device))
+    cnn_state_dict = {k: v for k, v in q_1m_model.state_dict().items() if "cnn" in k}
 
     traj_name = "trajectories_new"
     # cleaned_data_path = f"trajectories/cleaned_{traj_name}"
@@ -740,9 +756,9 @@ if __name__ == "__main__":
                              num_neg_samples=neg_len, fine_tune=False)
     
     
-    version = 2
+    version = 3
     run_name = f"Breakoutv4_w2v_img_similarity_5M_cnn_trajectories_new_{version}"
-    model_path = f"{run_folder}/{run_name}/w2v.cleanrl_model_{idex}"
+    model_path = f"{run_folder}/{run_name}/w2v.cleanrl_model_{idex}_1M"
     log_dir = f"{run_folder}/{run_name}"
     # Create the directory
     os.makedirs(log_dir, exist_ok=True)
