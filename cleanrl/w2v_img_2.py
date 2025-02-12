@@ -314,19 +314,20 @@ class ImageSkipGramModel(nn.Module):
         )
         with torch.no_grad(): # this step initializes the weights to identity matrix
             # This ensures initial output of w2v matches that of the encoder
-            self.w2v.weight.copy_(torch.eye(embed_size))  # Identity matrix
-            self.w2v.bias.fill_(0)  # Zero bias
+            # self.w2v.weight.copy_(torch.eye(embed_size))  # Identity matrix
+            self.w2v[0].weight.copy_(torch.eye(embed_size))  # Access the first layer's weight
+            self.w2v[0].bias.fill_(0)  # Zero bias
     
     def forward(self, target_img):
         # Generate the embedding for an input image
         # target_embedding = self.encoder(target_img)
-        target_embedding = self.cnn(target_img / 255.0)
+        initial_embedding = self.cnn(target_img / 255.0)
         # target_embedding *= 255.0
         # target_embedding = self.w2v(target_embedding / 255.0) # this creates a copy of the target_embeddings
 
         # Since the target layer is a single layer. Hence, we don't need to normalize it's input.
-        target_embedding = self.w2v(target_embedding) # this creates a copy of the target_embeddings
-        return target_embedding
+        target_embedding = self.w2v(initial_embedding) # this creates a copy of the target_embeddings
+        return initial_embedding, target_embedding
     
     # def loss_function(self, pos_scores, neg_scores):
     #     """
@@ -645,6 +646,12 @@ def store_context(images, val, window_size = 2):
 # Main: Running the Training
 # ===============================
 if __name__ == "__main__":
+    # Basic arguments/variables needed
+    batch = 4
+    context_len = 4
+    neg_len = 16
+    embed_dim=3136
+
     # Define the CNN model
     idex = 5000000 # Using the 5M model
     run_folder = f"runs_cnn"
@@ -662,6 +669,26 @@ if __name__ == "__main__":
     q_1m_model = cust_CNN_Model().to(device)
     q_1m_model.load_state_dict(torch.load(saved_model_path, map_location=device))
     cnn_state_dict = {k: v for k, v in q_1m_model.state_dict().items() if "cnn" in k}
+
+    check_code = False
+    if check_code:
+        print("Code check started!\n")
+        images = random_batch = np.random.randint(0, 256, (10, 1, 4, 84, 84), dtype=np.uint8)
+        print(random_batch.shape)  # Output: (10, 1, 4, 84, 84)
+        # torch.Tensor(obs).to(device)
+        model = ImageSkipGramModel(embed_size=embed_dim, freeze_pretrained=True).to(device)
+        model = load_model(model=model, cnn_state_dict=cnn_state_dict)
+        model.eval()
+        for i in range(len(images))[0:1]:
+            with torch.no_grad():
+                og_vec, new_vec = model(torch.Tensor(images[i]).to(device))
+                og_vec = og_vec.cpu().numpy()
+                new_vec = new_vec.cpu().numpy()
+            print("initial vector: ", og_vec)
+            print("vec from w2v: ", new_vec)
+            print("norm of difference after ReLU = ", np.linalg.norm(og_vec - new_vec))
+
+        assert False, "Code check"
 
     traj_name = "trajectories_new"
     # cleaned_data_path = f"trajectories/cleaned_{traj_name}"
@@ -700,10 +727,6 @@ if __name__ == "__main__":
     neighbours in the context_indices computation
     '''
 
-    batch = 4
-    context_len = 4
-    neg_len = 16
-    embed_dim=3136
     if deduplication:
         # clean_images, val_list, image_hashes, image_occurrences = cleaned_data(images, val)
         clean_images, val_list, _, _ = cleaned_data(images, val)
@@ -758,7 +781,7 @@ if __name__ == "__main__":
     
     version = 3
     run_name = f"Breakoutv4_w2v_img_similarity_5M_cnn_trajectories_new_{version}"
-    model_path = f"{run_folder}/{run_name}/w2v.cleanrl_model_{idex}_1M"
+    model_path = f"{run_folder}/{run_name}/w2v.value_{idex}_cnn_{idex_2}"
     log_dir = f"{run_folder}/{run_name}"
     # Create the directory
     os.makedirs(log_dir, exist_ok=True)

@@ -5,7 +5,7 @@ Here we will keep the following things fixed and work using those assumptions:
     If <4, then we will add removed ones to make it 4
     3. We will sample 16 negative samples for each target image
     4. Currently we're using the 5M model obtained during 10M training for Q-values
-    5. 
+    5. And we will use the 1M model for CNN weights in the w2v model
 
 '''
 import torch
@@ -205,15 +205,18 @@ class ImageSkipGramModel(nn.Module):
                 param.requires_grad = False
                 
         # An output layer that further transforms embeddings (for context prediction)
-        self.output_layer = nn.Linear(3136, embed_size)
+        self.w2v = nn.Sequential(
+            nn.Linear(3136, embed_dim),  # Input size matches the Flatten output of the CNN
+            nn.ReLU()
+        )
         with torch.no_grad(): # this step initializes the weights to identity matrix
-            # This ensures initial output of output_layer matches that of the encoder
-            self.output_layer.weight.copy_(torch.eye(embed_size))  # Identity matrix
-            self.output_layer.bias.fill_(0)  # Zero bias
+            # This ensures initial output of w2v matches that of the encoder
+            self.w2v[0].weight.copy_(torch.eye(embed_size))  # Access the first layer's weight
+            self.w2v[0].bias.fill_(0)  # Zero bias
     
     def forward(self, target_img):
-        target_embedding = self.cnn(target_img / 255.0)
-        target_embedding = self.output_layer(target_embedding) # this creates a copy of the target_embeddings
+        initial_embedding = self.cnn(target_img / 255.0)
+        target_embedding = self.w2v(initial_embedding) # this creates a copy of the target_embeddings
         return target_embedding
     
 # ===============================
@@ -385,7 +388,34 @@ if __name__ == "__main__":
     # q_network = cust_CNN_Model(envs).to(device)
     q_network = cust_CNN_Model().to(device)
     q_network.load_state_dict(torch.load(saved_model_path, map_location=device))
-    cnn_state_dict = {k: v for k, v in q_network.state_dict().items() if "cnn" in k}
+    # cnn_state_dict = {k: v for k, v in q_network.state_dict().items() if "cnn" in k}
+
+    # We use 1M trained CNN for training w2v
+    idex_2 = 1000000
+    saved_model_path_load = f"{run_folder}/{run_name}/dqn_atari.cleanrl_model_{idex_2}" # using the 1M model as baseline
+    q_1m_model = cust_CNN_Model().to(device)
+    q_1m_model.load_state_dict(torch.load(saved_model_path, map_location=device))
+    cnn_state_dict = {k: v for k, v in q_1m_model.state_dict().items() if "cnn" in k}
+
+    check_code = False 
+    # Make sure the model's return is adjusted to allow for multiple vector outputs
+    if check_code:
+        print("Code check started!\n")
+        images = random_batch = np.random.randint(0, 256, (10, 1, 4, 84, 84), dtype=np.uint8)
+        print(random_batch.shape)  # Output: (10, 1, 4, 84, 84)
+        model = ImageSkipGramModel(embed_size=embed_dim, freeze_pretrained=True).to(device)
+        model = load_model(model=model, cnn_state_dict=cnn_state_dict)
+        model.eval()
+        for i in range(len(images))[0:1]:
+            with torch.no_grad():
+                og_vec, new_vec = model(torch.Tensor(images[i]).to(device))
+                og_vec = og_vec.cpu().numpy()
+                new_vec = new_vec.cpu().numpy()
+            print("initial vector: ", og_vec)
+            print("vec from w2v: ", new_vec)
+            print("norm of difference = ", np.linalg.norm(og_vec - new_vec))
+
+        assert False, "Code check"
 
     traj_name = "trajectories_new"
     images, val = get_img(traj_name, model = q_network)
@@ -398,9 +428,9 @@ if __name__ == "__main__":
     model = train_model(images, cnn_state_dict=cnn_state_dict, embed_size=embed_dim, batch_size=batch, num_contexts = context_len,
                         num_neg_samples=neg_len, fine_tune=False)
     
-    version = 2
+    version = 1
     run_name_2 = f"Breakoutv4_w2v_img_3_similarity_5M_cnn_trajectories_new_{version}"
-    model_path = f"{run_folder}/{run_name_2}/w2v.cleanrl_model_{idex}"
+    model_path = f"{run_folder}/{run_name_2}/w2v.value_{idex}_cnn_{idex_2}"
     log_dir = f"{run_folder}/{run_name_2}"
     # Create the directory
     os.makedirs(log_dir, exist_ok=True)
