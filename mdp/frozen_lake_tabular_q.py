@@ -246,6 +246,7 @@ if __name__ == "__main__":
             # end for j
         # end for i
         print(f"Goal State: {goal_state}")
+        # assert False
     # end if check_env
 
     state_dim = env.observation_space.n
@@ -299,13 +300,4 @@ if __name__ == "__main__":
     file_name = f"Q_table_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}.npy"
     np.save(file_name, final_q_table)
 
-
-
-    ########################################################################
-    # # Now we save the trained model
-    # torch.save(learner.Q.state_dict(), args.save_filename)
-    # print('Episode Number {} Average Episodic Reward (over 100 episodes): {:.2f}'.format(e, np.mean(moving_window)))
-    # print('It was successful!')
-# end of code
-
-	
+    

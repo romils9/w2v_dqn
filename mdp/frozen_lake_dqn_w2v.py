@@ -29,6 +29,7 @@ from collections import deque, namedtuple
 import logging
 from matplotlib import animation # will be needed for rendering
 from gymnasium.envs.toy_text.frozen_lake import generate_random_map
+from tqdm import tqdm
 
 class ExperienceReplay:
 	"""
@@ -261,7 +262,7 @@ if __name__ == "__main__":
   parser.add_argument("--epsilon-start", default=1)               # start value of epsilon
   parser.add_argument("--epsilon-end", default=0.01)              # end value of epsilon
   parser.add_argument("--epsilon-decay", default=0.995)           # decay value of epsilon
-  parser.add_argument("--save-filename", default = "dqn_og_FrozenLake-v1" )
+  parser.add_argument("--save-filename", default = "dqn_w2v_FrozenLake-v1" )
   args, unknown = parser.parse_known_args()
 
   # making the environment
@@ -306,8 +307,14 @@ if __name__ == "__main__":
   state_dim = env.observation_space.n # here we will use 1-hot encoding
   action_dim = env.action_space.n
 
+
+  #################################################################################################
+  #################################### w2v related details ########################################
+  embed_dim = 12
+  word_embeddings = np.load(f"mdp/w2v_embed_dim_{embed_dim}_{args.env}_map_size_{env_dim}_stochastic_{stochastic}_seed_{args.seed}.npy", allow_pickle=True).item()
+
   kwargs = {
-    "state_dim":state_dim,
+    "state_dim":embed_dim,
     "action_dim":action_dim,
     "discount":args.discount,
     "tau":args.tau,
@@ -319,8 +326,32 @@ if __name__ == "__main__":
   }
   learner = DQNAgent(**kwargs) #Creating the DQN learning agent
 
-  one_hot_state = np.float32(np.eye(state_dim))
-  print("1-hot dtype: ", one_hot_state.dtype)
+#   print(np.eye(state_dim).dtype)
+#   assert False
+
+  state_embeddings = []
+  states = []
+  words = list(word_embeddings.keys())
+#   print(word_embeddings['s_0'])
+  for i in range(state_dim):
+    #  states.append(i)
+    if 's_'+str(i) in words:
+        state_embeddings.append(word_embeddings['s_'+str(i)])
+        # print(f"s_{i}: {word_embeddings['s_'+str(i)]}")
+    else:
+        temp = np.random.randn(embed_dim).astype(np.float32)
+        temp /= np.abs(np.max(temp))
+        state_embeddings.append(temp)
+        print(f"s_{i} not present in the w2v model, hence random vector initialized")
+        # print(f"s_{i}: {temp}")
+    
+  # end for
+  print("state embeddings dtype: ", state_embeddings[0].dtype)
+#   assert False
+  #################################################################################################
+  
+  one_hot_state = state_embeddings
+  print("Embeddings are loaded. Now we train dqn")
   # print(one_hot_state)
 
   # f = open('dqn_mountaincar.txt', 'w') # file to store the training log
@@ -330,7 +361,7 @@ if __name__ == "__main__":
   moving_window = deque(maxlen=100)
   epsilon = args.epsilon_start
   count = 0
-  for e in range(args.n_episodes):
+  for e in tqdm(range(args.n_episodes)):
     state, _ = env.reset(seed=args.seed)
     curr_reward = 0
     for t in range(args.max_esp_len):
@@ -361,7 +392,7 @@ if __name__ == "__main__":
 
     if e % 100 == 0:
       print('Episode Number {} Average Episodic Reward (over 100 episodes): {:.2f}'.format(e, np.mean(moving_window)))
-    #   # print('length of training rewards: ', len(reward_curve))
+      # print('length of training rewards: ', len(reward_curve))
 
     """"
     TODO: Write code for
@@ -385,7 +416,7 @@ if __name__ == "__main__":
 
   # Now we save the trained model
   # torch.save(learner.Q.state_dict(), 'dqn_og_seed_6_cartpole_v1_%i.pt'%(count))
-  torch.save(learner.Q.state_dict(), f"{args.save_filename}_seed_{args.seed}_mapsize_{env_dim}.pt")
+  torch.save(learner.Q.state_dict(), f"mdp/{args.save_filename}_seed_{args.seed}_mapsize_{env_dim}.pt")
   # print('Episode Number {} Average Episodic Reward (over 100 episodes): {:.2f}'.format(e, np.mean(moving_window)))
   final_policy = learner.get_optimal_policy(one_hot_state)
   print("Final policy: ", final_policy)
