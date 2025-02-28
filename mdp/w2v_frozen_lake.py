@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import numpy as np
 from collections import Counter
 from torch.utils.data import Dataset, DataLoader
@@ -13,14 +14,15 @@ env_name = "FrozenLake-v1"
 env_dim = 4
 stochastic = False
 seed = 42
-num_episodes = 10_000
+num_episodes = 1_000
 num_states = 16
 num_actions = 4
+modified = "perfect"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(seed=seed)
 torch.manual_seed(seed)
 
-traj_file = f"mdp/trajectories_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}.npy"
+traj_file = f"mdp/modified_{modified}_trajectories_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}.npy"
 # text = np.load(traj_file, allow_pickle=True).item()
 text = np.load(traj_file)
 # print("traj dtype: ", text[0].dtype)
@@ -31,10 +33,10 @@ text = np.load(traj_file)
 # ============================================================================================
 ''' Potential values for embedding dimensions = {4, 8, 12, 16, 20, 32} '''
 # w2v hyperparameters
-embed_dim = 12
+embed_dim = 32
 window_size = 2
 batch_size = 16
-w2v_epochs = 10
+w2v_epochs = 50
 w2v_lr = 0.01
 
 # Start defining word2vec as provided by ChatGPT-4o
@@ -64,7 +66,7 @@ def generate_skipgram_pairs(text, window_size=2): # This function gives the word
 # vocab,_,wcounts = build_vocab(text)
 # print("vocab: ", vocab)
 # print("word counts: ", wcounts)
-# assert False
+# assert False, "Checking the word counts!"
 
 # ============================================================================================
 # Class: Word2vec Dataset creator
@@ -111,7 +113,7 @@ class SkipGram(nn.Module):
 
     def forward(self, center_word_idx):
         """Compute word embeddings and softmax probabilities for the context words."""
-        center_embed = self.in_embedding(center_word_idx)  # Shape: (batch_size, embedding_dim)
+        center_embed = F.relu(self.in_embedding(center_word_idx))  # Shape: (batch_size, embedding_dim)
         scores = torch.matmul(center_embed, self.out_embedding.weight.T)  # Compute dot product
         y_pred = torch.softmax(scores, dim=1)  # Apply softmax over output vocab
         return y_pred
@@ -124,7 +126,7 @@ class SkipGram(nn.Module):
 # Function: to train the w2v skipgram model
 # ============================================================================================
 
-def train_skipgram(model, data_loader, epochs=10, lr=0.01, device = device):
+def train_skipgram(model, data_loader, epochs=6, lr=0.01, device = device):
     """Train the SkipGram model using Adam optimizer."""
     criterion = nn.CrossEntropyLoss()  # Cross-entropy for multi-class classification
     optimizer = optim.Adam(model.parameters(), lr)
@@ -164,11 +166,11 @@ word_embeddings = {}
 for word in vocab:
     word_idx = torch.tensor([vocab[word]], dtype=torch.long).to(device)
     updated_embedding = model.get_word_vector(word_idx)
-    print(f"Updated embedding for '{word}': {updated_embedding}")
+    # print(f"Updated embedding for '{word}': {updated_embedding}")
     # Store the embedding in the dictionary
     word_embeddings[word] = updated_embedding.flatten()  # Flatten to 1D array
 
-np.save(f"mdp/w2v_embed_dim_{embed_dim}_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}.npy", word_embeddings)
+np.save(f"mdp/modified_{modified}_w2v_embed_dim_{embed_dim}_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}_epochs_{w2v_epochs}.npy", word_embeddings)
 
 
 # ============================================================================================
@@ -178,7 +180,7 @@ np.save(f"mdp/w2v_embed_dim_{embed_dim}_{env_name}_map_size_{env_dim}_stochastic
 # from sklearn.metrics.pairwise import cosine_similarity
 
 # Load saved embeddings
-word_embeddings = np.load(f"mdp/w2v_embed_dim_{embed_dim}_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}.npy", 
+word_embeddings = np.load(f"mdp/modified_{modified}_w2v_embed_dim_{embed_dim}_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}_epochs_{w2v_epochs}.npy", 
                           allow_pickle=True).item()
 
 # Convert to a NumPy array for fast computation

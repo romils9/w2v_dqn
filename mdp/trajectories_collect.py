@@ -10,9 +10,10 @@ env_name = "FrozenLake-v1"
 env_dim = 4
 stochastic = False
 seed = 42
-num_episodes = 10_000
+num_episodes = 1_000
 num_states = 16
 num_actions = 4
+modified = "perfect"
 
 max_esp_len = 100
 
@@ -43,24 +44,40 @@ traj = []
 tuple_traj = False
 for e in tqdm(range(num_episodes)):
     # print(e)
-    if e<100:
-      epsilon = 1
-    elif e<200:
-      epsilon = 0.8
-    elif e<300:
-      epsilon = 0.6
-    elif e<400:
-      epsilon = 0.4
-    elif e<500:
-      epsilon = 0.2
-    elif e<600:
-      epsilon = 0.1
-    elif e<700:
-      epsilon = 0.05
+    if modified=="perfect":
+        _, _ = env.reset()
+        epsilon = 0.01
+        state = int(e%16)
     else:
-      epsilon = 0.01
-    # end epsilon if
-    state, _ = env.reset(seed=seed)
+        continue    
+    # if e<0.1*num_episodes:
+    #   epsilon = 1
+    # elif e<0.2*num_episodes:
+    #   epsilon = 0.8
+    # elif e<0.3*num_episodes:
+    #   epsilon = 0.6
+    # elif e<0.4*num_episodes:
+    #   epsilon = 0.4
+    # elif e<0.5*num_episodes:
+    #   epsilon = 0.2
+    # elif e<0.6*num_episodes:
+    #   epsilon = 0.1
+    # elif e<0.7*num_episodes:
+    #   epsilon = 0.05
+    # else:
+    #   epsilon = 0.01
+    # # end epsilon if
+    # if random.uniform(0, 1) < 0.3:
+    #     if random.uniform(0, 1) < 0.5:
+    #         state = 3
+    #     elif random.uniform(0, 1) < 0.65:
+    #         state = 6
+    #     else:
+    #         state = 7
+    #     # end if choosing state
+    # else:
+    #     state, _ = env.reset(seed=seed)
+    
     if not tuple_traj:
        traj.append('s_'+str(state))
     '''
@@ -70,6 +87,7 @@ for e in tqdm(range(num_episodes)):
     elements, different seeds can affect the placement of H (holes).
     '''
     curr_reward = 0
+    rep_count = 0
     for t in range(max_esp_len):
       action = choose_action(q_table, state, epsilon) #To be implemented
       n_state,reward,done,_,_ = env.step(action)
@@ -78,25 +96,33 @@ for e in tqdm(range(num_episodes)):
       if tuple_traj:
         traj.append((state, action, reward, n_state, done))
       else:
-        traj.append('s_'+str(n_state))
+        temp = 's_'+str(n_state)
+        # traj.append('s_'+str(n_state))
+        traj.append(temp)
 
       state = n_state
       curr_reward += reward
       if done:
-        if not tuple_traj:
-            if reward>0:
-                traj.append('s_'+str(16))
-            else:
-                traj.append('s_'+str(17))
-        break
+        if rep_count>=5: # This forces repetitions to occur when done becomes True thereby repeating ending states
+            if not tuple_traj:
+                if temp=='s_15':
+                    traj.append('s_'+str(16))
+                else:
+                    traj.append('s_'+str(17))
+            break
+        else:
+            if not tuple_traj:
+                traj.append(temp)
+        rep_count+=1
     # end for
 # end for
 if tuple_traj:
-    np.save(f"mdp/tuple_trajectories_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}.npy", traj)
+    np.save(f"mdp/modified_tuple_trajectories_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}.npy", traj)
 else:
-    np.save(f"mdp/trajectories_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}.npy", traj)
+    np.save(f"mdp/modified_{modified}_trajectories_{env_name}_map_size_{env_dim}_stochastic_{stochastic}_seed_{seed}.npy", traj)
 print("SAved!")
 
+assert False, "No w2v business here"
 # ============================================================================================
 # We perform w2v on the collected trajectories
 # ============================================================================================

@@ -83,12 +83,12 @@ class QNetwork(nn.Module):
     """
     super(QNetwork, self).__init__()
     self.l1 = nn.Linear(state_dim, 64)
-    self.l2 = nn.Linear(64, 64)
+    # self.l2 = nn.Linear(64, 64)
     self.l3 = nn.Linear(64, action_dim)
 
   def forward(self, state):
     q = F.relu(self.l1(state))
-    q = F.relu(self.l2(q))
+    # q = F.relu(self.l2(q))
     return self.l3(q)
 
 
@@ -310,8 +310,10 @@ if __name__ == "__main__":
 
   #################################################################################################
   #################################### w2v related details ########################################
-  embed_dim = 12
-  word_embeddings = np.load(f"mdp/w2v_embed_dim_{embed_dim}_{args.env}_map_size_{env_dim}_stochastic_{stochastic}_seed_{args.seed}.npy", allow_pickle=True).item()
+  embed_dim = 32
+  modified = "perfect"
+  w2v_epochs = 50
+  word_embeddings = np.load(f"mdp/modified_{modified}_w2v_embed_dim_{embed_dim}_{args.env}_map_size_{env_dim}_stochastic_{stochastic}_seed_{args.seed}_epochs_{w2v_epochs}.npy", allow_pickle=True).item()
 
   kwargs = {
     "state_dim":embed_dim,
