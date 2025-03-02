@@ -94,7 +94,6 @@ class QNetwork(nn.Module):
 
 
 class DQNAgent():
-
   def __init__(self,
    state_dim,
    action_dim,
@@ -311,9 +310,11 @@ if __name__ == "__main__":
   #################################################################################################
   #################################### w2v related details ########################################
   embed_dim = 32
-  modified = "perfect"
-  w2v_epochs = 50
-  word_embeddings = np.load(f"mdp/modified_{modified}_w2v_embed_dim_{embed_dim}_{args.env}_map_size_{env_dim}_stochastic_{stochastic}_seed_{args.seed}_epochs_{w2v_epochs}.npy", allow_pickle=True).item()
+  modified = "medium" # perfect - for perfect trajectories, random - for purely random trajectories or "medium" for the combined trajs
+  w2v_epochs = 60
+  filename = f"{args.env}_map_size_{env_dim}_stochastic_{stochastic}_seed_{args.seed}"
+  runs_folder_path = "mdp/runs_frozen"
+  word_embeddings = np.load(f"{runs_folder_path}/modified_{modified}_w2v_embed_dim_{embed_dim}_{filename}_epochs_{w2v_epochs}.npy", allow_pickle=True).item()
 
   kwargs = {
     "state_dim":embed_dim,
@@ -357,7 +358,7 @@ if __name__ == "__main__":
   # print(one_hot_state)
 
   # f = open('dqn_mountaincar.txt', 'w') # file to store the training log
-  temp_file = args.env + "_dqn_og.txt"
+  temp_file = f"{runs_folder_path}/w2v_logger_{filename}.txt"
   f = open(temp_file, 'w') # file to store the training log
   reward_curve = [] # this will store the moving avg of rewards
   moving_window = deque(maxlen=100)
@@ -417,9 +418,12 @@ if __name__ == "__main__":
   f.close() # to close the file
 
   # Now we save the trained model
-  # torch.save(learner.Q.state_dict(), 'dqn_og_seed_6_cartpole_v1_%i.pt'%(count))
-  torch.save(learner.Q.state_dict(), f"mdp/{args.save_filename}_seed_{args.seed}_mapsize_{env_dim}.pt")
-  # print('Episode Number {} Average Episodic Reward (over 100 episodes): {:.2f}'.format(e, np.mean(moving_window)))
+  rew_file = f"{runs_folder_path}/rewards_w2v_dqn_modified_{modified}_w2v_embed_dim_{embed_dim}_{filename}_epochs_{w2v_epochs}.npy"
+  np.save(rew_file, reward_curve)
+  model_saved_file = f"{runs_folder_path}/w2v_dqn_modified_{modified}_w2v_embed_dim_{embed_dim}_{filename}_epochs_{w2v_epochs}.pt"
+  torch.save(learner.Q.state_dict(), model_saved_file)
+  print("Model saved at: ", model_saved_file)
+
   final_policy = learner.get_optimal_policy(one_hot_state)
   print("Final policy: ", final_policy)
   state = 0
